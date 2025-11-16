@@ -1,0 +1,9 @@
+logs/cyt*
+logs/analysis/surveillance_analysis.log
+logs/kismet/*.kismet*
+
+surveillance_reports/*.md
+
+config/kismet.conf
+
+__pycache__

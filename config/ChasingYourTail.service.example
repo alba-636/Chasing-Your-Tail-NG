@@ -1,0 +1,9 @@
+[Unit]
+Description=Start Kismet at Startup
+After=network.target
+
+[Service]
+ExecStart=/bin/bash /home/{{ user_name }}/Chasing-Your-Tail-NG/start_kismet.sh
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,6 @@
+# Override default kismet config
+
+source=wlan0:name=Wifi
+source=hci0:name=Bluetooth
+
+log_prefix=/home/{{ user_name }}/Chasing-Your-Tail-NG/logs/kismet/
