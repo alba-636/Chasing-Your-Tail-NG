@@ -7,3 +7,5 @@ surveillance_reports/*.md
 config/kismet.conf
 
 __pycache__
+
+*.kismet*
