@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GPSLocation:
     """GPS coordinate with metadata"""
+    timestamp: float
     latitude: float
     longitude: float
     altitude: Optional[float] = None
-    timestamp: float = None
     accuracy: Optional[float] = None
     location_name: Optional[str] = None
 
@@ -43,22 +43,23 @@ class GPSTracker:
         self.locations = []
         self.location_sessions = []
         self.current_location = None
-        
-        # Location clustering settings
-        # self.location_threshold = 100  # meters - same location if within this distance
-        # self.session_timeout = 600     # seconds - new session if gap longer than this
-        
-    def add_gps_reading(self, latitude: float, longitude: float, 
-                       altitude: float = None, accuracy: float = None,
-                       location_name: str = None) -> str:
+
+    def add_gps_reading(
+        self,
+        latitude: float,
+        longitude: float, 
+        altitude: Optional[float] = None,
+        accuracy: Optional[float] = None,
+        location_name: Optional[str] = None
+    ) -> str:
         """Add a GPS reading and return location ID"""
         timestamp = time.time()
         
         location = GPSLocation(
+            timestamp=timestamp,
             latitude=latitude,
             longitude=longitude,
             altitude=altitude,
-            timestamp=timestamp,
             accuracy=accuracy,
             location_name=location_name
         )
