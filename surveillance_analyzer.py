@@ -18,6 +18,7 @@ from surveillance_detector import SurveillanceDetector, load_appearances_from_ki
 from gps_tracker import GPSTracker, KMLExporter
 from secure_credentials import secure_config_loader
 from src.ConfigHelper import load_config, Config
+from src.controller import DeviceController
 
 # Configure logging
 logging.basicConfig(
@@ -69,21 +70,10 @@ class SurveillanceAnalyzer:
             
             if not recent_db_files:
                 print(f"⚠️  No databases found from past {self.config.analysis_window_hours} hours!")
-                return
+                raise Exception("No databases found")
 
             print(f"📊 Found {len(recent_db_files)} databases from past {self.config.analysis_window_hours} hours:")
-            total_gps_coords = 0
-            for db_file in recent_db_files:
-                try:
-                    conn = sqlite3.connect(db_file)
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT COUNT(devmac) FROM devices WHERE avg_lat != 0 AND avg_lon != 0")
-                    gps_count = cursor.fetchone()[0]
-                    conn.close()
-                    print(f"   📁 {os.path.basename(db_file)}: {gps_count} GPS locations")
-                    total_gps_coords += gps_count
-                except:
-                    print(f"   ❌ {os.path.basename(db_file)}: Error reading")
+            total_gps_coords = DeviceController.getGPSCoordinateCount(recent_db_files)
             
             print(f"🛰️ Total GPS coordinates across all databases: {total_gps_coords}")
             # We'll process all recent databases, not just one
@@ -103,32 +93,8 @@ class SurveillanceAnalyzer:
             # Extract GPS coordinates from all Kismet databases
             print("🛰️ Extracting GPS coordinates from Kismet databases...")
             try:
-                all_gps_coords = []
-                
-                for db_file in db_files_to_process:
-                    try:
-                        conn = sqlite3.connect(db_file)
-                        cursor = conn.cursor()
-                        
-                        # Get GPS locations with timestamps from this database
-                        cursor.execute("""
-                            SELECT DISTINCT avg_lat, avg_lon, first_time
-                            FROM devices 
-                            WHERE avg_lat != 0 AND avg_lon != 0 
-                            ORDER BY first_time
-                        """)
-                        
-                        db_coords = cursor.fetchall()
-                        conn.close()
-                        
-                        if db_coords:
-                            print(f"   📁 {os.path.basename(db_file)}: {len(db_coords)} GPS locations")
-                            all_gps_coords.extend(db_coords)
-                        
-                    except Exception as e:
-                        print(f"   ❌ Error reading {os.path.basename(db_file)}: {e}")
-                        continue
-                
+                all_gps_coords = DeviceController.getAllGPSCoordinates(db_files_to_process)
+
                 if all_gps_coords:
                     # Sort all coordinates by timestamp and deduplicate nearby points
                     all_gps_coords.sort(key=lambda x: x[2])  # Sort by timestamp
