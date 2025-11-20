@@ -3,4 +3,6 @@
 source=wlan0:name=Wifi
 source=hci0:name=Bluetooth
 
+channel_hop_speed=2/sec
+
 log_prefix=/home/{{ user_name }}/Chasing-Your-Tail-NG/logs/kismet/
