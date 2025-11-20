@@ -93,6 +93,32 @@ class GPSTracker:
         _location_threshold = int(obj.get("location_threshold"))
         _session_timeout = int(obj.get("session_timeout"))
         return GPSTracker(_location_threshold, _session_timeout)
+    
+@dataclass
+class Kismet:
+    username: str
+    password: str
+    url: str
+    port: int
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'Kismet':
+        _username = str(obj.get("username"))
+        _password = str(obj.get("password"))
+        _url = str(obj.get("url"))
+        _port = int(obj.get("port"))
+        return Kismet(_username, _password, _url, _port)
+    
+@dataclass
+class Telegram:
+    bot_token: str
+    chat_id: str
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'Telegram':
+        _bot_token = str(obj.get("bot_token"))
+        _chat_id = str(obj.get("chat_id"))
+        return Telegram(_bot_token, _chat_id)
 
 @dataclass
 class Config:
@@ -102,6 +128,8 @@ class Config:
     search: Search
     detector_thresholds: DetectorThresholds
     gps_tracker: GPSTracker
+    kismet: Kismet
+    telegram: Telegram
 
     @staticmethod
     def from_dict(obj: Any) -> 'Config':
@@ -111,7 +139,9 @@ class Config:
         _search = Search.from_dict(obj.get("search"))
         _detector_thresholds = DetectorThresholds.from_dict(obj.get("detector_thresholds"))
         _gps_tracker = GPSTracker.from_dict(obj.get("gps_tracker"))
-        return Config(_analysis_window_hours, _paths, _timing, _search, _detector_thresholds, _gps_tracker)
+        _kismet = Kismet.from_dict(obj.get("kismet"))
+        _telegram = Telegram.from_dict(obj.get("telegram"))
+        return Config(_analysis_window_hours, _paths, _timing, _search, _detector_thresholds, _gps_tracker, _kismet, _telegram)
 
 def load_config(config_path: str) -> Config:
     with open(config_path, 'r') as config_file:
