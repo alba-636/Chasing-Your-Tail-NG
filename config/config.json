@@ -34,5 +34,17 @@
   "gps_tracker": {
     "location_threshold": 100,
     "session_timeout": 600
+  },
+
+  "kismet": {
+    "username": "",
+    "password": "",
+    "url": "localhost",
+    "port": 2501
+  },
+
+  "telegram": {
+    "bot_token": "",
+    "chat_id": ""
   }
 }
