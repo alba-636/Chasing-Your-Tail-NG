@@ -4,7 +4,7 @@ import requests
 import time
 from websockets.asyncio.client import connect
 from multiprocessing import Process
-from src.ConfigHelper import Config, load_config
+from ConfigHelper import Config, load_config
 
 class TargetDevices:
     title: str
