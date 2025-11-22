@@ -5,6 +5,7 @@ logs/kismet/*.kismet*
 surveillance_reports/*.md
 
 config/kismet.conf
+config/config.json
 
 __pycache__
 
