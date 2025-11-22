@@ -51,9 +51,9 @@ class MacFinder():
     def find_probables_in_database(self, start_at: int, end_at: int) -> list[MacProbable]:
         """ Find mac address present in given interval but not outside """
 
-        before = self.get_mac_between(start_at - (60*30), start_at - 60)
+        before = self.get_mac_between(start_at - (60*10), start_at - 60)
         inner = self.get_mac_between(start_at - 60, end_at + 60)
-        after = self.get_mac_between(end_at + 60, end_at + (60*30))
+        after = self.get_mac_between(end_at + 60, end_at + (60*10))
 
         probables: list[MacProbable] = []
         for probable in inner:
