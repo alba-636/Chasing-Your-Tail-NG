@@ -2,6 +2,7 @@ import asyncio
 import json
 import requests
 import time
+import argparse
 from websockets.asyncio.client import connect
 from multiprocessing import Process
 from ConfigHelper import Config, load_config
@@ -19,8 +20,8 @@ class TargetDevices:
 class TargetDetector():
     config: Config
 
-    def __init__(self):
-        self.config = load_config("config/config.json")
+    def __init__(self, config_path: str):
+        self.config = load_config(config_path)
 
     # TODO: Get full list from remote API?
     def load_traget_devices(self) -> list[TargetDevices]:
@@ -97,7 +98,13 @@ class TargetDetector():
         for process in processes:
             process.join()
 
-# TODO: arguments & logging
+# TODO: logging
 if __name__ == "__main__":
-    detector = TargetDetector()
+    parser = argparse.ArgumentParser(description="CYT Alert via a Telegram channel when specific device is detected")
+
+    parser.add_argument('--config-path', type=str, default="config/config.json", help='Path to specific CYT configuration file')
+
+    args = parser.parse_args()
+
+    detector = TargetDetector(args.config_path)
     asyncio.run(detector.start())
