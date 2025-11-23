@@ -19,9 +19,11 @@ class TargetDevices:
 
 class TargetDetector():
     config: Config
+    tagets: list[TargetDevices]
 
     def __init__(self, config_path: str):
         self.config = load_config(config_path)
+        self.targets = self.load_traget_devices()
 
     # TODO: Get full list from remote API?
     def load_traget_devices(self) -> list[TargetDevices]:
@@ -50,11 +52,11 @@ class TargetDetector():
             time.sleep(20)
 
             device = self.get_device(mac)
-            last_time = device[0]["kismet.device.base.last_time"] if len(device) > 0  else 0
+            last_time = device[0]["kismet.device.base.last_time"] if len(device) > 0 else 0
             now = time.time()
             last_seen = int(now - last_time)
 
-            if last_seen > 90:
+            if last_seen == 0:
                 is_lost = True
                 self.send_message(f"Target Lost!\nTitle: {target.title}\nDevice: {mac}")
                 continue
@@ -67,8 +69,7 @@ class TargetDetector():
         target.is_detected = False
 
     async def start(self):
-        targets = self.load_traget_devices()
-        print(f"Track {len(targets)} targets")
+        print(f"Track {len(self.targets)} targets")
 
         processes = []
 
@@ -85,7 +86,7 @@ class TargetDetector():
                 if not ("Detected new" in message and "device" in message):
                     continue
 
-                for target in targets:
+                for target in self.targets:
                     if target.is_detected:
                         continue
                     
