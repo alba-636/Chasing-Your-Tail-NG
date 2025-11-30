@@ -19,7 +19,7 @@ class TargetDevices:
 
 class TargetDetector():
     config: Config
-    tagets: list[TargetDevices]
+    targets: list[TargetDevices]
 
     def __init__(self, config_path: str):
         self.config = load_config(config_path)
@@ -56,7 +56,7 @@ class TargetDetector():
             now = time.time()
             last_seen = int(now - last_time)
 
-            if last_seen == 0:
+            if last_time == 0:
                 is_lost = True
                 self.send_message(f"Target Lost!\nTitle: {target.title}\nDevice: {mac}")
                 continue
@@ -83,7 +83,7 @@ class TargetDetector():
                 obj = json.loads(message)
                 message = obj["MESSAGE"]["kismet.messagebus.message_string"]
 
-                if not ("Detected new" in message and "device" in message):
+                if not ("Detected new" in message):
                     continue
 
                 for target in self.targets:

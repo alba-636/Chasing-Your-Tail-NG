@@ -16,16 +16,18 @@ class IgnoreLists:
 
 @dataclass
 class Paths:
+    database: str
     log_dir: str
     kismet_logs: str
     ignore_lists: IgnoreLists
 
     @staticmethod
     def from_dict(obj: Any) -> 'Paths':
+        _database = str(obj.get("database"))
         _log_dir = str(obj.get("log_dir"))
         _kismet_logs = str(obj.get("kismet_logs"))
         _ignore_lists = IgnoreLists.from_dict(obj.get("ignore_lists"))
-        return Paths(_log_dir, _kismet_logs, _ignore_lists)
+        return Paths(_database, _log_dir, _kismet_logs, _ignore_lists)
 
 @dataclass
 class Search:

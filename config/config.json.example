@@ -1,6 +1,7 @@
 {
   "analysis_window_hours": 48,
   "paths": {
+    "database": "logs/database.db",
     "log_dir": "logs",
     "kismet_logs": "logs/kismet/*.kismet",
     "ignore_lists": {

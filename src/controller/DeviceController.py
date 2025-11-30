@@ -22,7 +22,7 @@ def getGPSCoordinateCount(db_files) -> int:
             traceback.print_exc()
     return total_gps_coords
 
-def getAllGPSCoordinates(db_files):
+def getAllGPSCoordinates(db_files: list[str]):
     coordinates = []
     for db_file in db_files:
         try:
