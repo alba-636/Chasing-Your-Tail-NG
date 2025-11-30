@@ -1,0 +1,9 @@
+[Unit]
+Description=Start Data Collector
+After=Kismet.service
+
+[Service]
+ExecStart=/bin/bash /home/{{ user_name }}/Chasing-Your-Tail-NG/start_data_collector.sh
+
+[Install]
+WantedBy=default.target
