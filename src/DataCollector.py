@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sqlite3
+import argparse
 from dataclasses import dataclass
 from websockets.asyncio.client import connect
 from ConfigHelper import Config, load_config
@@ -97,6 +98,12 @@ def insert_device_in_database(database_path: str, device: DeviceData):
 if __name__ == "__main__":
     print("Hello, World!")
 
-    data_collector = DataCollector("config/config.json")
+    parser = argparse.ArgumentParser(description="CYT Alert via a Telegram channel when specific device is detected")
+
+    parser.add_argument('--config-path', type=str, default="config/config.json", help='Path to specific CYT configuration file')
+
+    args = parser.parse_args()
+
+    data_collector = DataCollector(args.config_path)
 
     asyncio.run(data_collector.start())
