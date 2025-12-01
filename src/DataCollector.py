@@ -2,6 +2,7 @@ import asyncio
 import json
 import sqlite3
 import argparse
+import time
 from dataclasses import dataclass
 from websockets.asyncio.client import connect
 from ConfigHelper import Config, load_config
@@ -24,16 +25,24 @@ class DataCollector():
         create_database(self.config.paths.database)
 
     async def start(self):
-        print("Connecting...")
-        # Kismet doc: https://www.kismetwireless.net/docs/api/devices/#realtime-device-monitoring
-        async with connect(uri=f"ws://{self.config.kismet.url}:{self.config.kismet.port}/devices/monitor.ws?user={self.config.kismet.username}&password={self.config.kismet.password}") as websocket:
-            print("Connected")
-            await websocket.send('{ "monitor": "*", "request": 4242, "rate": 1 }')
-            print("Listening to Devices")
+        max_retry = 10
+        for i in range(max_retry):
+            try:
+                print("Connecting...")
+                # Kismet doc: https://www.kismetwireless.net/docs/api/devices/#realtime-device-monitoring
+                async with connect(uri=f"ws://{self.config.kismet.url}:{self.config.kismet.port}/devices/monitor.ws?user={self.config.kismet.username}&password={self.config.kismet.password}") as websocket:
+                    print("Connected")
+                    await websocket.send('{ "monitor": "*", "request": 4242, "rate": 1 }')
+                    print("Listening to Devices")
 
-            while True:
-                data = await websocket.recv()
-                self.insert_data(str(data))
+                    while True:
+                        data = await websocket.recv()
+                        self.insert_data(str(data))
+                
+            except Exception as exception:
+                print(exception)
+                print("Retry in 10s...", f"(retry left: {max_retry - i - 1})")
+                time.sleep(10)
 
     def insert_data(self, data: str):
         data_json = json.loads(data)
