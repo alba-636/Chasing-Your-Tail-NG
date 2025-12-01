@@ -15,9 +15,6 @@ class DeviceData():
     longitude: float
     name: str | None
 
-    def print(self):
-        print("mac:", self.mac, "time:", self.time, "type:", self.type, "latitude:", self.latitude, "longitude:", self.longitude, "name:", self.name)
-
 class DataCollector():
     config: Config
 
@@ -27,9 +24,12 @@ class DataCollector():
         create_database(self.config.paths.database)
 
     async def start(self):
+        print("Connecting...")
         # Kismet doc: https://www.kismetwireless.net/docs/api/devices/#realtime-device-monitoring
         async with connect(uri=f"ws://{self.config.kismet.url}:{self.config.kismet.port}/devices/monitor.ws?user={self.config.kismet.username}&password={self.config.kismet.password}") as websocket:
+            print("Connected")
             await websocket.send('{ "monitor": "*", "request": 4242, "rate": 1 }')
+            print("Listening to Devices")
 
             while True:
                 data = await websocket.recv()
@@ -51,7 +51,7 @@ class DataCollector():
             name=data_json["kismet.device.base.name"]
         )
 
-        device_data.print()
+        print("mac:", device_data.mac, "time:", device_data.time, "type:", device_data.type, "latitude:", device_data.latitude, "longitude:", device_data.longitude, "name:", device_data.name)
 
         insert_device_in_database(self.config.paths.database, device=device_data)
 
@@ -98,7 +98,7 @@ def insert_device_in_database(database_path: str, device: DeviceData):
 if __name__ == "__main__":
     print("Hello, World!")
 
-    parser = argparse.ArgumentParser(description="CYT Alert via a Telegram channel when specific device is detected")
+    parser = argparse.ArgumentParser(description="CYT Collect devices data")
 
     parser.add_argument('--config-path', type=str, default="config/config.json", help='Path to specific CYT configuration file')
 

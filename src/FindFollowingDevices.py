@@ -4,6 +4,7 @@ import argparse
 import math
 from dataclasses import dataclass
 from ConfigHelper import Config, load_config
+from DataCollector import DeviceData
 
 @dataclass
 class GPSCoordinate():
@@ -14,10 +15,10 @@ class GPSCoordinate():
 class GPSCoordinateNode():
     time: float
     gps_coordinate: GPSCoordinate
-    devices: list[str]
+    devices: list[DeviceData]
 
-    def add_device(self, device: str):
-        if not device in self.devices:
+    def add_device(self, device: DeviceData):
+        if next((x for x in self.devices if x.mac == device.mac), None) == None:
             self.devices.append(device)
 
 class DetectFollowingDevices():
@@ -27,14 +28,14 @@ class DetectFollowingDevices():
     def __init__(self, config_path):
         self.config = load_config(config_path)
 
-    def get_all_coordinates(self):
+    def get_all_devices_data(self):
         coordinates = []
         try:
             connection = sqlite3.connect(self.config.paths.database)
             cursor = connection.cursor()
             
             cursor.execute("""
-                SELECT mac, latitude, longitude, time
+                SELECT mac, time, type, latitude, longitude, name
                     FROM devices
                     ORDER BY time;
             """)
@@ -68,21 +69,27 @@ class DetectFollowingDevices():
         return distance
 
     def load_gps_nodes(self):
-        coordinates = self.get_all_coordinates()
+        devices_data = self.get_all_devices_data()
 
-        print("coo", len(coordinates))
+        print("devices data:", len(devices_data))
 
-        for coordinate in coordinates:
-            time = float(coordinate[3])
-            mac: str = coordinate[0]
-            gps_coordinate = GPSCoordinate(float(coordinate[1]), float(coordinate[2]))
+        for data in devices_data:
+            device = DeviceData(
+                mac=data[0],
+                time=int(data[1]),
+                type=data[2],
+                latitude=float(data[3]),
+                longitude=float(data[4]),
+                name=data[5],
+            )
+            gps_coordinate = GPSCoordinate(device.latitude, device.longitude)
             
-            node = next((x for x in self.gps_nodes if self._calculate_distance(x.gps_coordinate, gps_coordinate) < 50 and x.time + 5 * 60 > time), None)
+            node = next((x for x in self.gps_nodes if self._calculate_distance(x.gps_coordinate, gps_coordinate) < 50 and x.time + 5 * 60 > device.time), None)
             if node == None:
-                node = GPSCoordinateNode(time, gps_coordinate, [mac])
+                node = GPSCoordinateNode(device.time, gps_coordinate, [device])
                 self.gps_nodes.append(node)
             else:
-                node.add_device(device=mac)
+                node.add_device(device)
 
         print("nodes:", len(self.gps_nodes))
 
@@ -94,25 +101,28 @@ class DetectFollowingDevices():
     def find_followers(self):
         print("find")
 
-        map: list[list[str | int]] = []
+        map: list[list] = []
 
         print("node:", len(self.gps_nodes[0].devices))
 
         for node in self.gps_nodes:
             for device in node.devices:
-                data = next((x for x in map if x[0] == device), None)
+                data = next((x for x in map if x[0].mac == device.mac), None)
                 if data == None:
                     data = [device, 1]
                     map.append(data)
                 else:
-                    data[1] = int(data[1]) + 1
+                    data[1] = data[1] + 1
 
         map.sort(key=lambda x: x[1], reverse=True)
 
         print("map:", len(map))
 
-        for i in range(10):
-            print(map[i])
+        for i in range(len(map)):
+            percentage = map[i][1] / len(self.gps_nodes)
+            if percentage > .5:
+                print(map[i])
+            
 
 
     def start(self):
