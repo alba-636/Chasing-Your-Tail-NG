@@ -1,10 +1,14 @@
 import sqlite3
 import os
 import argparse
-import math
+import haversine as hs   
+from haversine import Unit
+
 from dataclasses import dataclass
 from ConfigHelper import Config, load_config
-from DataCollector import DeviceData
+
+# Group by nodes of x seconds
+NODE_TIME_MAX = 60
 
 @dataclass
 class GPSCoordinate():
@@ -12,18 +16,99 @@ class GPSCoordinate():
     longitude: float
 
 @dataclass
-class GPSCoordinateNode():
-    time: float
-    gps_coordinate: GPSCoordinate
-    devices: list[DeviceData]
+class DeviceCoordinate():
+    time: int
+    latitude: float
+    longitude: float
 
-    def add_device(self, device: DeviceData):
+    def to_gps_coordinate(self) -> GPSCoordinate:
+        return GPSCoordinate(self.latitude, self.longitude)
+
+@dataclass
+class Device():
+    mac: str
+    type: str
+    coordinates: list[DeviceCoordinate]
+    name: str | None
+
+def calculate_distance(loc1: GPSCoordinate, loc2: GPSCoordinate) -> float:
+    return hs.haversine((loc1.latitude, loc1.longitude), (loc2.latitude, loc2.longitude), unit=Unit.METERS)
+
+@dataclass
+class GPSCoordinateNode():
+    number: int
+    time: int
+    gps_coordinate: GPSCoordinate
+    devices: list[Device]
+
+    latitudes: list[float]
+    lonitudes: list[float]
+
+    def add_device(self, device: Device):
         if next((x for x in self.devices if x.mac == device.mac), None) == None:
             self.devices.append(device)
 
+@dataclass
+class Ride():
+    start_time: int
+    end_time: int
+    nodes: list[GPSCoordinateNode]
+
+    def add_node(self, node: GPSCoordinateNode):
+        if len(self.nodes) == 0:
+            self.start_time = node.time
+        self.end_time = node.time
+        self.nodes.append(node)
+
+    def get_time(self) -> int:
+        return self.nodes[len(self.nodes) - 1].time - self.nodes[0].time
+
+    def get_distance(self) -> float:
+        distance = 0
+        for i in range(len(self.nodes)):
+            if i != len(self.nodes) - 1:
+                distance += calculate_distance(
+                    self.nodes[i].gps_coordinate,
+                    self.nodes[i + 1].gps_coordinate
+                    )
+        return distance
+
+@dataclass
+class DeviceDataMap():
+    device: Device
+    nodes: list[GPSCoordinateNode]
+
+    def get_rides(self) -> list[Ride]:
+        return rides_from_nodes(self.nodes)
+
+    def get_nodes_length(self) -> int:
+        if self.nodes == None:
+            return 0
+        return sum(len(ride.nodes) for ride in self.get_rides())
+    
+    def get_following_time(self) -> int:
+        if self.get_nodes_length() == 0:
+            return 0
+        return sum(ride.get_time() for ride in self.get_rides())
+    
+    def get_following_distance(self) -> float:
+        return sum(ride.get_distance() for ride in self.get_rides())
+
+def rides_from_nodes(nodes: list[GPSCoordinateNode]) -> list[Ride]:
+    rides:  list[Ride] = []
+    last_time: int = 0
+    for node in nodes:
+        if node.time - last_time > 600: # More than 10 minutes with the last node.
+            ride = Ride(node.time, node.time, [node])
+            rides.append(ride)
+        else:
+            rides[len(rides) - 1].add_node(node)
+        last_time = node.time
+    return rides
+
 class DetectFollowingDevices():
     config: Config
-    gps_nodes: list[GPSCoordinateNode] = []
+    rides: list[Ride] = []
 
     def __init__(self, config_path):
         self.config = load_config(config_path)
@@ -49,87 +134,97 @@ class DetectFollowingDevices():
             print(f"   ❌ Error reading {os.path.basename(self.config.paths.database)}: {exception}")
         return coordinates
 
-    def _calculate_distance(self, loc1: GPSCoordinate, loc2: GPSCoordinate) -> float:
-        """Calculate distance between two GPS locations in meters"""
-        # Haversine formula
-        R = 6371000  # Earth's radius in meters
-        
-        lat1_rad = math.radians(loc1.latitude)
-        lat2_rad = math.radians(loc2.latitude)
-        delta_lat = math.radians(loc2.latitude - loc1.latitude)
-        delta_lon = math.radians(loc2.longitude - loc1.longitude)
-        
-        a = (math.sin(delta_lat/2) * math.sin(delta_lat/2) +
-             math.cos(lat1_rad) * math.cos(lat2_rad) *
-             math.sin(delta_lon/2) * math.sin(delta_lon/2))
-        
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        distance = R * c
-        
-        return distance
-
-    def load_gps_nodes(self):
+    def build_gps_nodes(self) -> list[GPSCoordinateNode]:
         devices_data = self.get_all_devices_data()
 
         print("devices data:", len(devices_data))
 
+        devices: list[Device] = []
         for data in devices_data:
-            device = DeviceData(
-                mac=data[0],
+            device_name: str = data[5]
+            device_coordinate = DeviceCoordinate(
                 time=int(data[1]),
-                type=data[2],
                 latitude=float(data[3]),
                 longitude=float(data[4]),
-                name=data[5],
             )
-            gps_coordinate = GPSCoordinate(device.latitude, device.longitude)
-            
-            node = next((x for x in self.gps_nodes if self._calculate_distance(x.gps_coordinate, gps_coordinate) < 50 and x.time + 5 * 60 > device.time), None)
-            if node == None:
-                node = GPSCoordinateNode(device.time, gps_coordinate, [device])
-                self.gps_nodes.append(node)
+
+            device = next((x for x in devices if x.mac == data[0]), None)
+            if device == None:
+                device = Device(
+                    mac=data[0],
+                    type=data[2],
+                    coordinates=[device_coordinate],
+                    name=device_name,
+                )
+                devices.append(device)
             else:
-                node.add_device(device)
+                device.coordinates.append(device_coordinate)
+                if device.name == None or device.name == "":
+                    device.name = device_name
+            
+        nodes: list[GPSCoordinateNode] = []
+        for device in devices:
+            for coordinate in device.coordinates:
+                gps_coordinate = GPSCoordinate(coordinate.latitude, coordinate.longitude)
+                node = next((x for x in nodes if coordinate.time - x.time < NODE_TIME_MAX), None)
+                if node == None:
+                    node = GPSCoordinateNode(len(nodes) + 1, coordinate.time, gps_coordinate, [device], [], [])
+                    nodes.append(node)
+                else:
+                    node.add_device(device)
+                    node.latitudes.append(gps_coordinate.latitude)
+                    node.lonitudes.append(gps_coordinate.longitude)
 
-        print("nodes:", len(self.gps_nodes))
-
-        # for node in self.gps_nodes:
-        #     print("lat:", node.gps_coordinate.latitude, "lon:",node.gps_coordinate.longitude)
-        #     print("time:", node.time)
-        #     print("devices:", len(node.devices))
+        print("nodes:", len(nodes))
+        return nodes
+    
+    def load_rides(self, nodes: list[GPSCoordinateNode]):
+        if len(nodes) == 0:
+            print("[load_rides] nodes shounld't be enpty")
+        self.rides = rides_from_nodes(nodes)
 
     def find_followers(self):
-        print("find")
+        map: list[DeviceDataMap] = []
 
-        map: list[list] = []
+        for ride in self.rides:
+            for node in ride.nodes:
+                for device in node.devices:
+                    data = next((x for x in map if x.device.mac == device.mac), None)
+                    if data == None:
+                        data = DeviceDataMap(device=device, nodes=[node])
+                        map.append(data)
+                    else:
+                        data.nodes.append(node)
 
-        print("node:", len(self.gps_nodes[0].devices))
-
-        for node in self.gps_nodes:
-            for device in node.devices:
-                data = next((x for x in map if x[0].mac == device.mac), None)
-                if data == None:
-                    data = [device, 1]
-                    map.append(data)
-                else:
-                    data[1] = data[1] + 1
-
-        map.sort(key=lambda x: x[1], reverse=True)
+        map.sort(key=lambda x: x.get_following_distance(), reverse=True)
 
         print("map:", len(map))
+        print("length:", len(map[0].get_rides())) 
+
+        all_rides_length = len(self.rides)
+        all_rides_time = sum(ride.get_time() for ride in self.rides)
+        all_rides_distance = sum(ride.get_distance() for ride in self.rides)
 
         for i in range(len(map)):
-            percentage = map[i][1] / len(self.gps_nodes)
-            if percentage > .5:
-                print(map[i])
-            
-
+            percentage_length = len(map[i].get_rides()) / all_rides_length
+            percentage_time = map[i].get_following_time() / all_rides_time
+            percentage_distance = map[i].get_following_distance() / all_rides_distance
+            if percentage_length > .2 and percentage_time > .2 and percentage_distance > .2:
+                 print(
+                    "rides:", len(map[i].get_rides()),
+                    "nodes:", map[i].get_nodes_length(),
+                    "mac:", map[i].device.mac,
+                    "following time:", int(map[i].get_following_time() / 60),
+                    "following distance:", int(map[i].get_following_distance()),
+                    map[i].device.type,
+                    map[i].device.name,
+                )
 
     def start(self):
         print("Hello, World!")
 
-        self.load_gps_nodes()
-
+        nodes = self.build_gps_nodes()
+        self.load_rides(nodes)
         self.find_followers()
 
 # TODO: logging
