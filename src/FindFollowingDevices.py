@@ -1,9 +1,10 @@
 import sqlite3
 import os
 import argparse
+import json
+import time
 import haversine as hs   
 from haversine import Unit
-
 from dataclasses import dataclass
 from ConfigHelper import Config, load_config
 
@@ -23,6 +24,13 @@ class DeviceCoordinate():
 
     def to_gps_coordinate(self) -> GPSCoordinate:
         return GPSCoordinate(self.latitude, self.longitude)
+    
+    def to_json(self) -> dict:
+        return {
+            "time": self.time,
+            "latitude": self.latitude,
+            "longitude": self.longitude
+        }
 
 @dataclass
 class Device():
@@ -30,6 +38,15 @@ class Device():
     type: str
     coordinates: list[DeviceCoordinate]
     name: str | None
+
+    def to_json(self) -> dict:
+        return {
+            "mac": self.mac,
+            "type": self.type,
+            "coordinates": [
+                coordinate.to_json() for coordinate in self.coordinates
+            ]
+        }
 
 def calculate_distance(loc1: GPSCoordinate, loc2: GPSCoordinate) -> float:
     return hs.haversine((loc1.latitude, loc1.longitude), (loc2.latitude, loc2.longitude), unit=Unit.METERS)
@@ -79,20 +96,30 @@ class DeviceDataMap():
     nodes: list[GPSCoordinateNode]
 
     def get_rides(self) -> list[Ride]:
+        if self.get_nodes_length() == 0:
+            return []
         return rides_from_nodes(self.nodes)
 
     def get_nodes_length(self) -> int:
         if self.nodes == None:
             return 0
-        return sum(len(ride.nodes) for ride in self.get_rides())
+        return len(self.nodes)
     
+    # Return the following time of the device in seconds
     def get_following_time(self) -> int:
-        if self.get_nodes_length() == 0:
-            return 0
         return sum(ride.get_time() for ride in self.get_rides())
     
+    # Return the following distance of the device in meters
     def get_following_distance(self) -> float:
         return sum(ride.get_distance() for ride in self.get_rides())
+    
+    def to_json(self) -> dict:
+        return {
+            "device": self.device.to_json(),
+            "nodes_length": self.get_nodes_length(),
+            "following_time": self.get_following_time(),
+            "following_distance": self.get_following_distance()
+        }
 
 def rides_from_nodes(nodes: list[GPSCoordinateNode]) -> list[Ride]:
     rides:  list[Ride] = []
@@ -108,10 +135,12 @@ def rides_from_nodes(nodes: list[GPSCoordinateNode]) -> list[Ride]:
 
 class DetectFollowingDevices():
     config: Config
+    analyse_full: bool
     rides: list[Ride] = []
 
-    def __init__(self, config_path):
+    def __init__(self, config_path, analyse_full: bool):
         self.config = load_config(config_path)
+        self.analyse_full = analyse_full
 
     def get_all_devices_data(self):
         coordinates = []
@@ -119,11 +148,23 @@ class DetectFollowingDevices():
             connection = sqlite3.connect(self.config.paths.database)
             cursor = connection.cursor()
             
-            cursor.execute("""
-                SELECT mac, time, type, latitude, longitude, name
-                    FROM devices
-                    ORDER BY time;
-            """)
+            if self.analyse_full:
+                cursor.execute("""
+                    SELECT mac, time, type, latitude, longitude, name
+                        FROM devices
+                        ORDER BY time;
+                """)
+            else:
+                min_time = time.time() - (self.config.analysis_window_hours * 60 * 60)
+                cursor.execute(
+                    """
+                        SELECT mac, time, type, latitude, longitude, name
+                            FROM devices
+                            WHERE time > ?
+                            ORDER BY time;
+                    """,
+                    (min_time,)
+                )
             
             db_coords = cursor.fetchall()
             connection.close()
@@ -137,8 +178,6 @@ class DetectFollowingDevices():
     def build_gps_nodes(self) -> list[GPSCoordinateNode]:
         devices_data = self.get_all_devices_data()
 
-        print("devices data:", len(devices_data))
-
         devices: list[Device] = []
         for data in devices_data:
             device_name: str = data[5]
@@ -148,7 +187,7 @@ class DetectFollowingDevices():
                 longitude=float(data[4]),
             )
 
-            device = next((x for x in devices if x.mac == data[0]), None)
+            device = next((device for device in devices if device.mac == data[0]), None)
             if device == None:
                 device = Device(
                     mac=data[0],
@@ -166,7 +205,7 @@ class DetectFollowingDevices():
         for device in devices:
             for coordinate in device.coordinates:
                 gps_coordinate = GPSCoordinate(coordinate.latitude, coordinate.longitude)
-                node = next((x for x in nodes if coordinate.time - x.time < NODE_TIME_MAX), None)
+                node = next((node for node in nodes if coordinate.time - node.time < NODE_TIME_MAX), None)
                 if node == None:
                     node = GPSCoordinateNode(len(nodes) + 1, coordinate.time, gps_coordinate, [device], [], [])
                     nodes.append(node)
@@ -175,15 +214,13 @@ class DetectFollowingDevices():
                     node.latitudes.append(gps_coordinate.latitude)
                     node.lonitudes.append(gps_coordinate.longitude)
 
-        print("nodes:", len(nodes))
         return nodes
     
     def load_rides(self, nodes: list[GPSCoordinateNode]):
-        if len(nodes) == 0:
-            print("[load_rides] nodes shounld't be enpty")
-        self.rides = rides_from_nodes(nodes)
+        if len(nodes) != 0:
+            self.rides = rides_from_nodes(nodes)
 
-    def find_followers(self):
+    def find_followers(self) -> list[DeviceDataMap]:
         map: list[DeviceDataMap] = []
 
         for ride in self.rides:
@@ -198,42 +235,36 @@ class DetectFollowingDevices():
 
         map.sort(key=lambda x: x.get_following_distance(), reverse=True)
 
-        print("map:", len(map))
-        print("length:", len(map[0].get_rides())) 
-
         all_rides_length = len(self.rides)
         all_rides_time = sum(ride.get_time() for ride in self.rides)
         all_rides_distance = sum(ride.get_distance() for ride in self.rides)
 
+        following_devices: list[DeviceDataMap] = []
         for i in range(len(map)):
             percentage_length = len(map[i].get_rides()) / all_rides_length
             percentage_time = map[i].get_following_time() / all_rides_time
             percentage_distance = map[i].get_following_distance() / all_rides_distance
             if percentage_length > .2 and percentage_time > .2 and percentage_distance > .2:
-                 print(
-                    "rides:", len(map[i].get_rides()),
-                    "nodes:", map[i].get_nodes_length(),
-                    "mac:", map[i].device.mac,
-                    "following time:", int(map[i].get_following_time() / 60),
-                    "following distance:", int(map[i].get_following_distance()),
-                    map[i].device.type,
-                    map[i].device.name,
-                )
+                following_devices.append(map[i])
+        return following_devices
 
     def start(self):
-        print("Hello, World!")
-
         nodes = self.build_gps_nodes()
         self.load_rides(nodes)
-        self.find_followers()
+
+        following_devices = self.find_followers()
+
+        output = { "devices": [device.to_json() for device in following_devices] }
+        print(json.dumps(output))
 
 # TODO: logging
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CYT Detect if a device is following you")
 
-    parser.add_argument('--config-path', type=str, default="config/config.json", help='Path to specific CYT configuration file')
+    parser.add_argument("--config-path", type=str, default="config/config.json", help="Path to specific CYT configuration file")
+    parser.add_argument("--full", action="store_true", default=False, help="Analyse the all database")
 
     args = parser.parse_args()
 
-    detector = DetectFollowingDevices(args.config_path)
+    detector = DetectFollowingDevices(args.config_path, args.full)
     detector.start()
