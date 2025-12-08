@@ -3,13 +3,15 @@ import os
 import argparse
 import json
 import time
+import statistics
 import haversine as hs   
 from haversine import Unit
 from dataclasses import dataclass
 from ConfigHelper import Config, load_config
 
 # Group by nodes of x seconds
-NODE_TIME_MAX = 60
+NODE_TIME_MAX = 30
+NODE_DISTANCE_MAX = 25
 
 @dataclass
 class GPSCoordinate():
@@ -65,17 +67,37 @@ class GPSCoordinateNode():
         if next((x for x in self.devices if x.mac == device.mac), None) == None:
             self.devices.append(device)
 
+    def get_avg_coordinate(self) -> GPSCoordinate:
+        return GPSCoordinate(
+            latitude=statistics.mean(self.latitudes),
+            longitude=statistics.mean(self.lonitudes)
+        )
+    
+    def merge(self, node: 'GPSCoordinateNode'):
+        for device in node.devices:
+            self.add_device(device)
+
+        self.latitudes.extend(node.latitudes)
+        self.lonitudes.extend(node.lonitudes)
+
+        self.gps_coordinate = self.get_avg_coordinate()
+
 @dataclass
 class Ride():
     start_time: int
     end_time: int
     nodes: list[GPSCoordinateNode]
 
-    def add_node(self, node: GPSCoordinateNode):
+    def add_node(self, new_node: GPSCoordinateNode):
         if len(self.nodes) == 0:
-            self.start_time = node.time
-        self.end_time = node.time
-        self.nodes.append(node)
+            self.start_time = new_node.time
+        self.end_time = new_node.time
+
+        node = next((node for node in self.nodes if calculate_distance(node.get_avg_coordinate(), new_node.get_avg_coordinate()) < NODE_DISTANCE_MAX), None)
+        if node == None:
+            self.nodes.append(new_node)
+        else:
+            node.merge(new_node)
 
     def get_time(self) -> int:
         return self.nodes[len(self.nodes) - 1].time - self.nodes[0].time
@@ -87,7 +109,7 @@ class Ride():
                 distance += calculate_distance(
                     self.nodes[i].gps_coordinate,
                     self.nodes[i + 1].gps_coordinate
-                    )
+                )
         return distance
 
 @dataclass
@@ -121,6 +143,19 @@ class DeviceDataMap():
             "following_distance": self.get_following_distance()
         }
 
+@dataclass
+class RidesStatistics():
+    rides_length: int
+    rides_time: int
+    rides_distance: float
+
+    def to_json(self) -> dict:
+        return {
+            "rides_length": self.rides_length,
+            "rides_time": self.rides_time,
+            "rides_distance": self.rides_distance
+        }
+
 def rides_from_nodes(nodes: list[GPSCoordinateNode]) -> list[Ride]:
     rides:  list[Ride] = []
     last_time: int = 0
@@ -136,11 +171,12 @@ def rides_from_nodes(nodes: list[GPSCoordinateNode]) -> list[Ride]:
 class DetectFollowingDevices():
     config: Config
     analyse_full: bool
-    rides: list[Ride] = []
+    only_current: bool
 
-    def __init__(self, config_path, analyse_full: bool):
+    def __init__(self, config_path, analyse_full: bool, only_current: bool):
         self.config = load_config(config_path)
         self.analyse_full = analyse_full
+        self.only_current = only_current
 
     def get_all_devices_data(self):
         coordinates = []
@@ -216,14 +252,14 @@ class DetectFollowingDevices():
 
         return nodes
     
-    def load_rides(self, nodes: list[GPSCoordinateNode]):
-        if len(nodes) != 0:
-            self.rides = rides_from_nodes(nodes)
+    def load_rides(self, nodes: list[GPSCoordinateNode]) -> list[Ride]:
+        if len(nodes) == 0:
+            return []
+        return rides_from_nodes(nodes)
 
-    def find_followers(self) -> list[DeviceDataMap]:
+    def find_followers(self, rides: list[Ride]) -> tuple[list[DeviceDataMap], RidesStatistics]:
         map: list[DeviceDataMap] = []
-
-        for ride in self.rides:
+        for ride in rides:
             for node in ride.nodes:
                 for device in node.devices:
                     data = next((x for x in map if x.device.mac == device.mac), None)
@@ -235,26 +271,33 @@ class DetectFollowingDevices():
 
         map.sort(key=lambda x: x.get_following_distance(), reverse=True)
 
-        all_rides_length = len(self.rides)
-        all_rides_time = sum(ride.get_time() for ride in self.rides)
-        all_rides_distance = sum(ride.get_distance() for ride in self.rides)
+        statistics = RidesStatistics(
+            rides_length=len(rides),
+            rides_time=sum(ride.get_time() for ride in rides),
+            rides_distance=sum(ride.get_distance() for ride in rides)
+        )
 
         following_devices: list[DeviceDataMap] = []
         for i in range(len(map)):
-            percentage_length = len(map[i].get_rides()) / all_rides_length
-            percentage_time = map[i].get_following_time() / all_rides_time
-            percentage_distance = map[i].get_following_distance() / all_rides_distance
+            percentage_length = len(map[i].get_rides()) / statistics.rides_length
+            percentage_time = map[i].get_following_time() / statistics.rides_time
+            percentage_distance = map[i].get_following_distance() / statistics.rides_distance
             if percentage_length > .2 and percentage_time > .2 and percentage_distance > .2:
                 following_devices.append(map[i])
-        return following_devices
+        return (following_devices, statistics)
 
     def start(self):
         nodes = self.build_gps_nodes()
-        self.load_rides(nodes)
+        rides = self.load_rides(nodes)
 
-        following_devices = self.find_followers()
+        following_devices: list[DeviceDataMap] = []
+        statistics: RidesStatistics | None = None
+        if self.only_current and len(rides) > 0:
+            (following_devices, statistics) = self.find_followers([rides[len(rides) - 1]])
+        else:
+            (following_devices, statistics) = self.find_followers(rides)
 
-        output = { "devices": [device.to_json() for device in following_devices] }
+        output = { "devices": [device.to_json() for device in following_devices], "statistics": statistics.to_json() }
         print(json.dumps(output))
 
 # TODO: logging
@@ -263,8 +306,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--config-path", type=str, default="config/config.json", help="Path to specific CYT configuration file")
     parser.add_argument("--full", action="store_true", default=False, help="Analyse the all database")
+    parser.add_argument("--only-current", action="store_true", default=False, help="Analyse only the current (last) ride")
 
     args = parser.parse_args()
 
-    detector = DetectFollowingDevices(args.config_path, args.full)
+    detector = DetectFollowingDevices(args.config_path, args.full, args.only_current)
     detector.start()
