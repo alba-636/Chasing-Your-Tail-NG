@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from websockets.asyncio.client import connect
 from ConfigHelper import Config, load_config
 
+WEB_SOCKET_REQUEST_ID = 4242
+MAX_CONNECTION_RETRY = 10
+CONNECTION_RETRY_DELAY_IN_SECOND = 10
+
 @dataclass
 class DeviceData():
     mac: str
@@ -25,24 +29,28 @@ class DataCollector():
         create_database(self.config.paths.database)
 
     async def start(self):
-        max_retry = 10
-        for i in range(max_retry):
+        for i in range(MAX_CONNECTION_RETRY):
             try:
-                print("Connecting...")
-                # Kismet doc: https://www.kismetwireless.net/docs/api/devices/#realtime-device-monitoring
-                async with connect(uri=f"ws://{self.config.kismet.url}:{self.config.kismet.port}/devices/monitor.ws?user={self.config.kismet.username}&password={self.config.kismet.password}") as websocket:
-                    print("Connected")
-                    await websocket.send('{ "monitor": "*", "request": 4242, "rate": 1 }')
-                    print("Listening to Devices")
-
-                    while True:
-                        data = await websocket.recv()
-                        self.insert_data(str(data))
-                
+                await self.connect_to_web_socket()
             except Exception as exception:
                 print(exception)
-                print("Retry in 10s...", f"(retry left: {max_retry - i - 1})")
-                time.sleep(10)
+                print(f"Retring in {MAX_CONNECTION_RETRY}s...", f"(retry left: {MAX_CONNECTION_RETRY - i - 1})")
+                time.sleep(CONNECTION_RETRY_DELAY_IN_SECOND)
+
+    # Kismet doc: https://www.kismetwireless.net/docs/api/devices/#realtime-device-monitoring
+    async def connect_to_web_socket(self):
+        print("Connecting...")
+
+        uri = f"ws://{self.config.kismet.url}:{self.config.kismet.port}/devices/monitor.ws?user={self.config.kismet.username}&password={self.config.kismet.password}"
+        async with connect(uri=uri) as websocket:
+            print("Connected")
+            # Monitor all devices and request update each seconds.
+            await websocket.send('{ "monitor": "*", "request": WEB_SOCKET_REQUEST_ID, "rate": 1 }')
+            print("Listening to Devices")
+
+            while True:
+                data = await websocket.recv()
+                self.insert_data(str(data))
 
     def insert_data(self, data: str):
         data_json = json.loads(data)
@@ -107,9 +115,9 @@ def insert_device_in_database(database_path: str, device: DeviceData):
 if __name__ == "__main__":
     print("Hello, World!")
 
-    parser = argparse.ArgumentParser(description="CYT Collect devices data")
+    parser = argparse.ArgumentParser(description="Collect devices data from Kismet.")
 
-    parser.add_argument('--config-path', type=str, default="config/config.json", help='Path to specific CYT configuration file')
+    parser.add_argument('--config-path', type=str, default="config/config.json", help='Path to specific the configuration file')
 
     args = parser.parse_args()
 
