@@ -1,3 +1,0 @@
-non_alert_ssid_list = [
-    
-]
